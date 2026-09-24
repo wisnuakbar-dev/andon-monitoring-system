@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  users       User[]
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("roles")
+}
+
+model User {
+  id              Int              @id @default(autoincrement())
+  username        String           @unique
+  password        String
+  name            String
+  email           String?          @unique
+  roleId          Int
+  role            Role             @relation(fields: [roleId], references: [id])
+  productionSetup ProductionSetup[]
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
+
+  @@index([roleId])
+  @@map("users")
+}
+
+model Shift {
+  id              Int              @id @default(autoincrement())
+  name            String           @unique
+  code            String           @unique
+  startTime       String
+  endTime         String
+  description     String?
+  productionSetup ProductionSetup[]
+  workOrders      WorkOrder[]
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
+
+  @@map("shifts")
+}
+
+model Item {
+  id              Int              @id @default(autoincrement())
+  code            String           @unique
+  name            String
+  description     String?
+  defects         Defect[]
+  productionSetup ProductionSetup[]
+  workOrders      WorkOrder[]
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
+
+  @@map("items")
+}
+
+model Machine {
+  id              Int              @id @default(autoincrement())
+  code            String           @unique
+  name            String
+  location        String?
+  isActive        Boolean          @default(true)
+  abnormalities   Abnormality[]
+  productionSetup ProductionSetup[]
+  workOrders      WorkOrder[]
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
+
+  @@map("machines")
+}
+
+model Abnormality {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  name        String
+  description String?
+  machineId   Int
+  machine     Machine  @relation(fields: [machineId], references: [id])
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([machineId])
+  @@map("abnormalities")
+}
+
+model ProductionSetup {
+  id             Int         @id @default(autoincrement())
+  code           String      @unique
+  shiftId        Int
+  shift          Shift       @relation(fields: [shiftId], references: [id])
+  machineId      Int
+  machine        Machine     @relation(fields: [machineId], references: [id])
+  itemId         Int
+  item           Item        @relation(fields: [itemId], references: [id])
+  operatorId     Int
+  operator       User        @relation(fields: [operatorId], references: [id])
+  targetQuantity Int?
+  startedAt      DateTime?   @db.Timestamptz(3)
+  endedAt        DateTime?   @db.Timestamptz(3)
+  status         SetupStatus @default(PLANNED)
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
+
+  @@index([shiftId])
+  @@index([machineId])
+  @@index([itemId])
+  @@index([operatorId])
+  @@index([status])
+  @@map("production_setups")
+}
+
+model Defect {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  name        String
+  description String?
+  itemId      Int
+  item        Item     @relation(fields: [itemId], references: [id])
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([itemId])
+  @@map("defects")
+}
+
+enum SetupStatus {
+  PLANNED
+  RUNNING
+  COMPLETED
+  STOPPED
+}
+
+enum WorkOrderType {
+  HARIAN
+  BULANAN
+}
+
+enum ApprovalStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
+enum ProductionResult {
+  OK
+  NG
+  REJECT
+}
+
+enum DowntimeCategory {
+  BREAKDOWN
+  SETUP
+  MATERIAL
+  MAINTENANCE
+  QUALITY
+  OTHER
+}
+
+model WorkOrder {
+  id             Int             @id @default(autoincrement())
+  code           String          @unique
+  type           WorkOrderType   @default(HARIAN)
+  approvalStatus ApprovalStatus  @default(DRAFT)
+  description    String?
+  targetQuantity Int?
+  scheduledDate  DateTime?       @db.Timestamptz(3)
+  dueDate        DateTime?       @db.Timestamptz(3)
+  shiftId        Int
+  shift          Shift           @relation(fields: [shiftId], references: [id])
+  machineId      Int
+  machine        Machine         @relation(fields: [machineId], references: [id])
+  itemId         Int
+  item           Item            @relation(fields: [itemId], references: [id])
+  productionLogs ProductionLog[]
+  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @db.Timestamptz(3)
+
+  @@index([shiftId])
+  @@index([machineId])
+  @@index([itemId])
+  @@index([type])
+  @@index([approvalStatus])
+  @@map("work_orders")
+}
+
+model ProductionLog {
+  id               Int                @id @default(autoincrement())
+  workOrderId      Int
+  workOrder        WorkOrder          @relation(fields: [workOrderId], references: [id])
+  loggedAt         DateTime           @default(now()) @db.Timestamptz(3)
+  cycleTimeSeconds Int?
+  result           ProductionResult   @default(OK)
+  goodQty          Int?
+  ngQty            Int?
+  downtimeCategory DowntimeCategory?
+  downtimeMinutes  Int?
+  note             String?
+  createdAt        DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime           @updatedAt @db.Timestamptz(3)
+
+  @@index([workOrderId])
+  @@index([downtimeCategory])
+  @@map("production_logs")
+}
