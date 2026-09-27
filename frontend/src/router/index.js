@@ -24,6 +24,12 @@ const router = createRouter({
       children: [
         { path: '', name: 'dashboard', component: DashboardView },
         { path: 'work-orders', name: 'work-orders', component: WorkOrdersView },
+        {
+          path: 'production-analytics',
+          name: 'production-analytics',
+          component: () => import('@/views/ProductionAnalyticsView.vue'),
+          meta: { roles: ['ADMIN', 'SUPERVISOR'] },
+        },
         { path: 'operator-playground', name: 'operator-playground', component: OperatorPlaygroundView },
         { path: 'users', name: 'users', component: UsersView },
         { path: 'machines', name: 'machines', component: MachinesView },
@@ -38,6 +44,10 @@ router.beforeEach((to) => {
 
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+
+  if (to.meta.roles && !to.meta.roles.includes(auth.roleCode)) {
+    return { name: 'dashboard' }
   }
 
   if (to.name === 'login' && auth.isAuthenticated) {

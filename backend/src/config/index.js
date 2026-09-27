@@ -11,3 +11,6 @@ export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d'
 export const MQTT_BROKER_URL = process.env.MQTT_BROKER_URL || 'wss://test.mosquitto.org:8081/mqtt'
 export const MQTT_TOPIC = process.env.MQTT_TOPIC || 'andon/simulator'
 export const MQTT_CLIENT_ID = process.env.MQTT_CLIENT_ID || 'andon-ingest'
+
+// Zona waktu untuk pengelompokan "per hari" pada laporan analytics
+export const ANALYTICS_TIMEZONE = process.env.ANALYTICS_TIMEZONE || 'Asia/Jakarta'
