@@ -51,7 +51,7 @@ npm install
 ## Menjalankan
 
 ```bash
-# Terminal 1 - Backend (http://localhost:3000)
+# Terminal 1 - Backend (http://localhost:3000, WebSocket di /socket.io)
 cd backend
 npm run dev
 
@@ -79,6 +79,8 @@ Semua endpoint di bawah `/api/...` kecuali `/api/auth/login` memerlukan header `
 | DELETE | /api/work-orders/:id            | Admin | Hapus WorkOrder            |
 | GET    | /api/analytics/summary          | Admin, Supervisor | Ringkasan analitik produksi (OK/NG, Pareto defect, downtime, OEE) per hari & per shift |
 | GET    | /api/production-logs            | Admin, Supervisor | Log produksi mentah untuk drill-down angka di halaman Production Analytics |
+| GET    | /api/realtime/kpi               | Auth | Snapshot KPI terbaru dengan payload yang sama seperti yang di-push via WebSocket |
+| GET    | /api/realtime/status            | Auth | Jumlah klien WebSocket terhubung & scope KPI aktif |
 | GET    | /api/health                     | Public | Cek status API             |
 
 ### GET /api/analytics/summary
@@ -156,6 +158,76 @@ Respons `{ data, meta: { page, limit, total, totalPages } }`, dengan `data` suda
 | Batang Pareto Defect       | `defectCode=<kode>`                                    |
 | Baris Downtime per Kategori | `downtimeCategory=<kategori>&hasDowntime=true`      |
 
+### Realtime KPI (WebSocket / Socket.IO)
+
+Server Express menjalankan Socket.IO pada path `/socket.io` (bisa diubah lewat `SOCKET_PATH`). Alur push-nya:
+
+```
+MQTT broker ──> services/ingest.js ──> prisma.productionLog.create() (sukses)
+                                            │
+                                            └─> notifyKpiChanged(trigger)
+                                                   │  (debounce KPI_BROADCAST_DEBOUNCE_MS)
+                                                   ▼
+                                    getKpiSnapshot() ──> emit "kpi:update" ke semua klien
+```
+
+- Broadcast hanya dihitung ulang untuk **scope yang sedang punya klien terhubung**; kalau tidak ada pendengar, tidak ada query yang dijalankan.
+- Burst pesan MQTT (mis. 5 event sekaligus) dipadatkan jadi **satu** perhitungan KPI dan satu emit, dengan `trigger.count` berisi jumlah event yang digabung.
+- Setiap scope punya snapshot sementara dengan TTL 10 detik, dipakai untuk klien yang baru subscribe supaya tidak perlu query ulang.
+- Perhitungan KPI memakai fungsi OEE yang sama dengan `/api/analytics/summary` (`services/analytics.service.js`), sehingga angka yang di-push identik dengan angka saat halaman di-refresh.
+
+Handshake socket wajib memakai JWT yang valid (`auth.token`, atau `?token=` di query string); koneksi tanpa token ditolak. Parameter scope yang sama dengan `/api/realtime/kpi` menentukan isi payload per klien (tiap scope punya room sendiri).
+
+| Event server      | Kapan                                 | Payload                                                       |
+| ----------------- | ------------------------------------- | ------------------------------------------------------------- |
+| `kpi:snapshot`    | Balasan `kpi:subscribe` / `kpi:refresh` | `{ scope, snapshot }` - KPI terkini saat klien subscribe      |
+| `kpi:update`      | Ada data baru dari MQTT Ingest         | `{ trigger, snapshot }` - `trigger` berisi sumber & data yang memicu |
+| `kpi:error`       | Parameter tidak valid / query gagal    | `{ message }`                                                  |
+
+| Event klien      | Payload                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `kpi:subscribe`  | `{ rangeDays?, timezone?, from?, to?, shiftId?, machineId?, itemId?, workOrderId? }` (default `rangeDays` = `KPI_RANGE_DAYS`) |
+| `kpi:refresh`    | tanpa payload - hitung ulang & kirim `kpi:snapshot` ke socket itu saja                                             |
+
+Isi `snapshot`:
+
+| Field               | Isi                                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `generatedAt`       | Waktu snapshot dibuat                                                                                                                                    |
+| `range`             | `{ from, to, timezone, days }`                                                                                                                            |
+| `filters`           | Filter yang dipakai                                                                                                                                       |
+| `totals`            | `logCount`, OK/NG/REJECT, `totalQty`, `resultCounts`, downtime, `targetQuantity`, `achievementPercentage`, ideal cycle time, dan `oee` (`plannedMinutes`, `downtimeMinutes`, `operatingMinutes`, `availability`, `performance`, `performanceBasis`, `quality`, `oee`) |
+| `downtimeByCategory`| Total downtime per kategori + persentasenya                                                                                                              |
+| `topDefects`        | 5 Pareto defect teratas (`isVitalFew` = mencapai 80% kumulatif)                                                                                           |
+| `byMachine`         | KPI (termasuk OEE) per mesin                                                                                                                              |
+| `byShift`           | KPI (termasuk OEE) per shift                                                                                                                              |
+| `recentLogs`        | `KPI_RECENT_LOGS` log produksi terakhir lengkap dengan mesin/item/shift dan `defectCode` hasil parse dari `note`                                          |
+
+Contoh pemakaian di frontend:
+
+```js
+import { io } from 'socket.io-client'
+
+const socket = io('http://localhost:3000', { auth: { token: authStore.token } })
+
+socket.on('connect', () => {
+  // scope = filter halaman yang sedang dibuka
+  socket.emit('kpi:subscribe', { rangeDays: 7, machineId: 1 })
+})
+
+socket.on('kpi:snapshot', ({ snapshot }) => applyKpi(snapshot))
+socket.on('kpi:update', ({ snapshot, trigger }) => applyKpi(snapshot, trigger))
+```
+
+#### Initial load di frontend
+
+`stores/realtime.js` tidak bergantung penuh pada WebSocket:
+
+- Snapshot pertama diambil lewat `GET /api/realtime/kpi` dengan scope yang sama, paralel dengan handshake socket. Siapa pun yang lebih dulu sampai, papan andon langsung tampil.
+- Socket tetap menangani pembaruan berikutnya. Kalau socket tidak tersambung (backend sedang restart, CORS, dsb), halaman tetap berisi data dan state `loading` sudah `false`; hanya perubahan filter/refresh yang memakai jalur REST.
+- State `loading` hanya `true` selama belum ada satu pun snapshot, jadi layar "Menyiapkan data realtime..." tidak akan menggantung ketika REST maupun socket sama-sama gagal - yang muncul adalah pesan error beserta tombol "Coba lagi".
+- Respons REST yang sudah basi (scope diganti lagi sebelum respons tiba) dibuang lewat penomoran request, jadi tidak menimpa data yang lebih baru.
+
 ### RBAC
 
 | Role       | Akses                                    |
@@ -163,5 +235,8 @@ Respons `{ data, meta: { page, limit, total, totalPages } }`, dengan `data` suda
 | Admin      | Read + Write pada semua masterdata       |
 | Supervisor | Read-only (GET)                          |
 | Operator   | Diblokir (403)                           |
+
+Kecuali `/api/realtime/kpi` dan `/api/realtime/status` (serta WebSocket KPI), yang terbuka untuk semua role yang
+sudah login karena isinya dipakai untuk monitoring dashboard andon.
 
 Akun default: `admin / admin123` (dibuat oleh `npm run seed`).

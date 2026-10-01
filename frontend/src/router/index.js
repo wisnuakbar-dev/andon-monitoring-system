@@ -36,6 +36,13 @@ const router = createRouter({
         { path: 'items', name: 'items', component: ItemsView },
       ],
     },
+    {
+      // Papan TV full-screen, di luar DefaultLayout
+      path: '/andon-monitoring',
+      name: 'andon-monitoring',
+      component: () => import('@/views/AndonMonitoringView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

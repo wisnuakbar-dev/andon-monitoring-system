@@ -2,7 +2,8 @@ import express from 'express'
 import helmet from 'helmet'
 import cors from 'cors'
 import morgan from 'morgan'
-import { CLIENT_URL, NODE_ENV } from './config/index.js'
+import { CLIENT_URL, NODE_ENV, SOCKET_PATH } from './config/index.js'
+import { getSocketStats } from './services/socket.service.js'
 import indexRouter from './routes/index.js'
 import { notFound, errorHandler } from './middleware/error.middleware.js'
 
@@ -18,7 +19,11 @@ if (NODE_ENV === 'development') {
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    websocket: { path: SOCKET_PATH, clients: getSocketStats().clients },
+  })
 })
 
 app.use('/api', indexRouter)

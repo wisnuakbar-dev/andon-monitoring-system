@@ -8,7 +8,7 @@ const VITAL_FEW_THRESHOLD = 80
 const BUCKET_PARETO_LIMIT = 5
 
 const round2 = (value) => Math.round(value * 100) / 100
-const percentage = (part, whole) => (whole > 0 ? round2((part / whole) * 100) : 0)
+export const percentage = (part, whole) => (whole > 0 ? round2((part / whole) * 100) : 0)
 
 const parseClock = (value) => {
   const [hour, minute] = String(value ?? '')
@@ -19,7 +19,7 @@ const parseClock = (value) => {
 }
 
 // Shift yang melewati tengah malam (mis. 23:00 - 07:00) dihitung 8 jam
-const shiftDurationMinutes = (startTime, endTime) => {
+export const shiftDurationMinutes = (startTime, endTime) => {
   const start = parseClock(startTime)
   const end = parseClock(endTime)
   if (start === null || end === null) return null
@@ -27,7 +27,7 @@ const shiftDurationMinutes = (startTime, endTime) => {
   return diff > 0 ? diff : diff + 24 * 60
 }
 
-const emptyMetrics = () => ({
+export const emptyMetrics = () => ({
   logCount: 0,
   okQty: 0,
   ngQty: 0,
@@ -42,7 +42,7 @@ const emptyMetrics = () => ({
   downtimeByCategory: {},
 })
 
-const mergeRow = (metrics, row) => {
+export const mergeRow = (metrics, row) => {
   metrics.logCount += row.logCount
   metrics.okQty += row.okQty
   metrics.ngQty += row.ngQty
@@ -70,7 +70,7 @@ const mergeRow = (metrics, row) => {
 }
 
 // Siklus ideal: cycle time tercepat yang pernah tercatat, fallback rata-rata
-const resolveIdealCycleTime = (metrics) => {
+export const resolveIdealCycleTime = (metrics) => {
   if (metrics.bestCycleTimeSeconds !== null) {
     return { seconds: metrics.bestCycleTimeSeconds, basis: 'MIN_CYCLE_TIME' }
   }
@@ -120,7 +120,7 @@ const buildOee = ({ plannedMinutes, metrics, idealCycleTimeSeconds, targetQuanti
   }
 }
 
-const finalizeMetrics = ({ metrics, plannedMinutes, targetQuantity = 0 }) => {
+export const finalizeMetrics = ({ metrics, plannedMinutes, targetQuantity = 0 }) => {
   const totalQty = metrics.okQty + metrics.ngQty + metrics.rejectQty
   const { seconds: idealCycleTimeSeconds, basis: idealCycleTimeBasis } = resolveIdealCycleTime(metrics)
 
@@ -144,7 +144,7 @@ const finalizeMetrics = ({ metrics, plannedMinutes, targetQuantity = 0 }) => {
 }
 
 // Daftar tanggal kalender pada rentang [from, toExclusive), dipakai untuk zero-fill
-const zonedDays = (from, toExclusive, timeZone) => {
+export const zonedDays = (from, toExclusive, timeZone) => {
   const dates = []
   let cursor = startOfZonedDay(from, timeZone)
 
@@ -157,16 +157,25 @@ const zonedDays = (from, toExclusive, timeZone) => {
   return dates
 }
 
-const buildFilterSql = ({ from, toExclusive, shiftId, machineId, itemId, workOrderId }) => {
+export const buildFilterSql = ({
+  from,
+  toExclusive,
+  shiftId,
+  machineId,
+  itemId,
+  workOrderId,
+  logAlias = 'pl',
+  workOrderAlias = 'w',
+}) => {
   const conditions = [
-    Prisma.sql`pl."loggedAt" >= ${from}::timestamptz`,
-    Prisma.sql`pl."loggedAt" < ${toExclusive}::timestamptz`,
+    Prisma.sql`${Prisma.raw(logAlias)}."loggedAt" >= ${from}::timestamptz`,
+    Prisma.sql`${Prisma.raw(logAlias)}."loggedAt" < ${toExclusive}::timestamptz`,
   ]
 
-  if (workOrderId) conditions.push(Prisma.sql`pl."workOrderId" = ${workOrderId}`)
-  if (shiftId) conditions.push(Prisma.sql`w."shiftId" = ${shiftId}`)
-  if (machineId) conditions.push(Prisma.sql`w."machineId" = ${machineId}`)
-  if (itemId) conditions.push(Prisma.sql`w."itemId" = ${itemId}`)
+  if (workOrderId) conditions.push(Prisma.sql`${Prisma.raw(logAlias)}."workOrderId" = ${workOrderId}`)
+  if (shiftId) conditions.push(Prisma.sql`${Prisma.raw(workOrderAlias)}."shiftId" = ${shiftId}`)
+  if (machineId) conditions.push(Prisma.sql`${Prisma.raw(workOrderAlias)}."machineId" = ${machineId}`)
+  if (itemId) conditions.push(Prisma.sql`${Prisma.raw(workOrderAlias)}."itemId" = ${itemId}`)
 
   return Prisma.join(conditions, ' AND ')
 }

@@ -1,6 +1,4 @@
-import jwt from 'jsonwebtoken'
-import prisma from '../config/prisma.js'
-import { JWT_SECRET } from '../config/index.js'
+import { resolveUserFromToken } from '../utils/authToken.js'
 
 export const authenticate = async (req, res, next) => {
   const header = req.headers.authorization
@@ -8,21 +6,8 @@ export const authenticate = async (req, res, next) => {
     return res.status(401).json({ message: 'Token tidak ditemukan. Gunakan header: Authorization: Bearer <token>' })
   }
 
-  let payload
-  try {
-    payload = jwt.verify(header.slice(7), JWT_SECRET)
-  } catch (err) {
-    return res.status(401).json({ message: 'Token tidak valid atau sudah kedaluwarsa' })
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: payload.sub },
-    include: { role: true },
-  })
-
-  if (!user) {
-    return res.status(401).json({ message: 'User tidak terdaftar' })
-  }
+  const { user, error } = await resolveUserFromToken(header.slice(7))
+  if (error) return res.status(401).json({ message: error })
 
   req.user = user
   next()

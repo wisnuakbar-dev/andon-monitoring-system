@@ -1,6 +1,7 @@
 import mqtt from 'mqtt'
 import prisma from '../config/prisma.js'
 import { MQTT_BROKER_URL, MQTT_TOPIC, MQTT_CLIENT_ID } from '../config/index.js'
+import { notifyKpiChanged } from './kpi.broadcaster.js'
 
 const VALID_RESULTS = ['OK', 'NG', 'REJECT']
 const VALID_DOWNTIME = ['BREAKDOWN', 'SETUP', 'MATERIAL', 'MAINTENANCE', 'QUALITY', 'OTHER']
@@ -96,6 +97,21 @@ async function handleMessage(topic, message) {
     console.log(
       `[ingest] ProductionLog #${saved.id} tersimpan: ${event} | WO ${workOrderId} | result=${entry.result} | good=${entry.goodQty ?? 0} | ng=${entry.ngQty ?? 0}`
     )
+
+    // Data baru sudah tersimpan -> memicu broadcast KPI realtime ke semua klien WebSocket
+    notifyKpiChanged({
+      source: 'mqtt-ingest',
+      topic,
+      event,
+      productionLogId: saved.id,
+      workOrderId,
+      result: saved.result,
+      goodQty: saved.goodQty,
+      ngQty: saved.ngQty,
+      downtimeCategory: saved.downtimeCategory,
+      downtimeMinutes: saved.downtimeMinutes,
+      loggedAt: saved.loggedAt.toISOString(),
+    })
   } catch (err) {
     console.error(`[ingest] Gagal menyimpan ProductionLog untuk event "${event}": ${err.message}`)
   }

@@ -11,6 +11,7 @@ import defectRoutes from './defect.routes.js'
 import workOrderRoutes from './work-order.routes.js'
 import analyticsRoutes from './analytics.routes.js'
 import productionLogRoutes from './production-log.routes.js'
+import realtimeRoutes from './realtime.routes.js'
 
 const router = express.Router()
 
@@ -26,5 +27,6 @@ router.use('/defects', defectRoutes)
 router.use('/work-orders', workOrderRoutes)
 router.use('/analytics', analyticsRoutes)
 router.use('/production-logs', productionLogRoutes)
+router.use('/realtime', realtimeRoutes)
 
 export default router
