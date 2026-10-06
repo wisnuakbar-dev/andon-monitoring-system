@@ -1,5 +1,5 @@
 import { Server } from 'socket.io'
-import { CLIENT_URL, SOCKET_PATH, SOCKET_PING_INTERVAL, SOCKET_PING_TIMEOUT } from '../config/index.js'
+import { CLIENT_ORIGINS, SOCKET_PATH, SOCKET_PING_INTERVAL, SOCKET_PING_TIMEOUT, corsOrigin } from '../config/index.js'
 import { resolveUserFromToken } from '../utils/authToken.js'
 
 export const SCOPE_ROOM_PREFIX = 'kpi:'
@@ -51,7 +51,7 @@ export const initSocket = (httpServer) => {
 
   io = new Server(httpServer, {
     path: SOCKET_PATH,
-    cors: { origin: CLIENT_URL, credentials: true },
+    cors: { origin: corsOrigin, credentials: true },
     pingInterval: SOCKET_PING_INTERVAL,
     pingTimeout: SOCKET_PING_TIMEOUT,
   })
@@ -77,7 +77,7 @@ export const initSocket = (httpServer) => {
     })
   })
 
-  console.log(`[socket] Socket.IO siap di path "${SOCKET_PATH}" (CORS: ${CLIENT_URL})`)
+  console.log(`[socket] Socket.IO siap di path "${SOCKET_PATH}" (CORS: ${CLIENT_ORIGINS.join(', ')})`)
 
   return io
 }

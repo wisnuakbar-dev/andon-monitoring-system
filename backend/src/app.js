@@ -2,7 +2,7 @@ import express from 'express'
 import helmet from 'helmet'
 import cors from 'cors'
 import morgan from 'morgan'
-import { CLIENT_URL, NODE_ENV, SOCKET_PATH } from './config/index.js'
+import { NODE_ENV, SOCKET_PATH, corsOrigin } from './config/index.js'
 import { getSocketStats } from './services/socket.service.js'
 import indexRouter from './routes/index.js'
 import { notFound, errorHandler } from './middleware/error.middleware.js'
@@ -10,7 +10,7 @@ import { notFound, errorHandler } from './middleware/error.middleware.js'
 const app = express()
 
 app.use(helmet())
-app.use(cors({ origin: CLIENT_URL, credentials: true }))
+app.use(cors({ origin: corsOrigin, credentials: true }))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 

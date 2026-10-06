@@ -4,7 +4,19 @@ dotenv.config()
 
 export const PORT = process.env.PORT || 3000
 export const NODE_ENV = process.env.NODE_ENV || 'development'
-export const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
+// Satu atau banyak origin frontend yang diizinkan CORS, dipisah koma.
+// Contoh produksi: CLIENT_URL="http://localhost:5173,https://andon.vercel.app"
+export const CLIENT_ORIGINS = (process.env.CLIENT_URLS || process.env.CLIENT_URL || 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
+
+export const CLIENT_URL = CLIENT_ORIGINS[0]
+
+export const corsOrigin = (origin, callback) => {
+  if (!origin || CLIENT_ORIGINS.includes(origin)) return callback(null, true)
+  return callback(null, false)
+}
 export const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-secret-ganti-di-produksi'
 export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d'
 
