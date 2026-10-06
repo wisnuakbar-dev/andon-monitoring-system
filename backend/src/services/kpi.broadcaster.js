@@ -1,7 +1,9 @@
 import { KPI_BROADCAST_DEBOUNCE_MS } from '../config/index.js'
 import { getKpiSnapshot, resolveKpiScope, sanitizeScopeParams } from './kpi.service.js'
 import {
+  ANDON_EVENT,
   activeScopes,
+  broadcastAndonEvent,
   emitToScope,
   emitToSocket,
   getIo,
@@ -63,6 +65,9 @@ const flush = async (scopeKey) => {
     state.snapshot = snapshot
     state.computedAt = Date.now()
     emitToScope(scopeKey, KPI_EVENT.UPDATE, { trigger, snapshot })
+    // Event tanpa filter scope, supaya klien yang belum subscribe (atau layar
+    // lain seperti Operator Playground) tetap tahu ada data baru.
+    broadcastAndonEvent(ANDON_EVENT.UPDATE, { trigger, snapshot })
     console.log(`[kpi] Broadcast "${KPI_EVENT.UPDATE}" ke ${subscriberCount(scopeKey)} klien (${trigger.source})`)
   } catch (err) {
     console.error(`[kpi] Gagal menghitung KPI untuk scope ${scopeKey}: ${err.message}`)

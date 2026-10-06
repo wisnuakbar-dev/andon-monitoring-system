@@ -165,11 +165,26 @@ Server Express menjalankan Socket.IO pada path `/socket.io` (bisa diubah lewat `
 ```
 MQTT broker ──> services/ingest.js ──> prisma.productionLog.create() (sukses)
                                             │
+                                            ├─> emit "production:log" (langsung, tanpa scope)
+                                            │
                                             └─> notifyKpiChanged(trigger)
                                                    │  (debounce KPI_BROADCAST_DEBOUNCE_MS)
                                                    ▼
-                                    getKpiSnapshot() ──> emit "kpi:update" ke semua klien
+                                    getKpiSnapshot() ──> emit "kpi:update" ke room scope
+                                                         + "andon:update" ke semua klien
 ```
+
+### Konfigurasi broker MQTT (penting)
+
+Broker dan topik **harus sama** antara backend (subscribe) dan Operator Playground (publish), kalau tidak event mendarat di broker yang tidak ada pendengarnya dan papan Andon tetap `0 pcs`.
+
+Backend adalah sumber kebenaran. `GET /api/realtime/ingest-config` mengembalikan broker aktif (beserta versi WebSocket-nya), topik yang di-subscribe, dan daftar nama event; halaman Operator Playground memanggil endpoint ini saat mount dan mengisi formnya sendiri. Nilai hanya ditimpa kalau user mengetik sendiri (manual override).
+
+| Variabel         | Default                                                                  | Keterangan                                                                     |
+| ---------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `MQTT_BROKER_URL` | `mqtt://test.mosquitto.org:1883`                                          | Broker utama. Dipakai backend **dan** diturunkan ke URL WebSocket untuk browser |
+| `MQTT_BROKERS`    | `mqtt://test.mosquitto.org:1883,mqtt://broker.hivemq.com:1883`            | Daftar broker cadangan; dicoba berurutan, pindah otomatis saat koneksi tutup     |
+| `MQTT_TOPIC`      | `andon/simulator`                                                          | Topik subscribe (bisa beberapa, pisah koma). Wildcard `andon/#` juga bisa, tapi pada broker publik ikut menangkap trafik aplikasi lain |
 
 - Broadcast hanya dihitung ulang untuk **scope yang sedang punya klien terhubung**; kalau tidak ada pendengar, tidak ada query yang dijalankan.
 - Burst pesan MQTT (mis. 5 event sekaligus) dipadatkan jadi **satu** perhitungan KPI dan satu emit, dengan `trigger.count` berisi jumlah event yang digabung.
@@ -183,6 +198,10 @@ Handshake socket wajib memakai JWT yang valid (`auth.token`, atau `?token=` di q
 | `kpi:snapshot`    | Balasan `kpi:subscribe` / `kpi:refresh` | `{ scope, snapshot }` - KPI terkini saat klien subscribe      |
 | `kpi:update`      | Ada data baru dari MQTT Ingest         | `{ trigger, snapshot }` - `trigger` berisi sumber & data yang memicu |
 | `kpi:error`       | Parameter tidak valid / query gagal    | `{ message }`                                                  |
+| `production:log`  | Log produksi baru tersimpan di DB      | `{ event, productionLogId, workOrderId, machineId, result, goodQty, ngQty, downtimeCategory, downtimeMinutes, loggedAt }` |
+| `andon:update`    | Snapshot KPI selesai dihitung ulang    | `{ trigger, snapshot }` - sama dengan `kpi:update`, tapi dikirim ke **semua** klien tanpa filter scope |
+
+`production:log` dikirim seketika setelah `prisma.productionLog.create()` sukses, sebelum perhitungan KPI selesai. Layar Andon memakainya sebagai pemicu untuk menarik ulang snapshot (dengan jeda pendek 250 ms), sehingga angka output naik pada(event berikutnya tanpa menunggu debounce `kpi:update`.
 
 | Event klien      | Payload                                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------- |

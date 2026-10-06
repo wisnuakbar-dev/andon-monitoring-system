@@ -8,8 +8,28 @@ export const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
 export const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-secret-ganti-di-produksi'
 export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d'
 
-export const MQTT_BROKER_URL = process.env.MQTT_BROKER_URL || 'wss://test.mosquitto.org:8081/mqtt'
-export const MQTT_TOPIC = process.env.MQTT_TOPIC || 'andon/simulator'
+// Daftar broker MQTT, mencoba berurutan sampai ada yang bisa dikoneksikan.
+// Broker pertama (MQTT_BROKER_URL) adalah yang dipakai browser lewat WebSocket,
+// jadi backend dan frontend selalu.publish ke broker yang sama.
+const MQTT_BROKERS = (process.env.MQTT_BROKERS
+  || process.env.MQTT_BROKER_URL
+  || 'mqtt://test.mosquitto.org:1883,mqtt://broker.hivemq.com:1883')
+  .split(',')
+  .map((url) => url.trim())
+  .filter(Boolean)
+
+export const MQTT_BROKER_URLS = MQTT_BROKERS
+export const MQTT_BROKER_URL = MQTT_BROKERS[0]
+
+// Topik yang di-subscribe backend (bisa beberapa topik, dipisah koma).
+// Wildcard "andon/#" juga didukung, tapi pada broker publik akan ikut
+// menangkap trafik aplikasi lain yang memakai topik serupa.
+export const MQTT_TOPICS = (process.env.MQTT_TOPICS || process.env.MQTT_TOPIC || 'andon/simulator')
+  .split(',')
+  .map((topic) => topic.trim())
+  .filter(Boolean)
+
+export const MQTT_TOPIC = MQTT_TOPICS[0]
 export const MQTT_CLIENT_ID = process.env.MQTT_CLIENT_ID || 'andon-ingest'
 
 // Zona waktu untuk pengelompokan "per hari" pada laporan analytics

@@ -65,10 +65,9 @@
           </button>
         </form>
 
-        <p class="mt-6 text-center text-xs text-gray-400 dark:text-gray-500">
-          Akun default: <span class="font-mono">admin / admin123</span>
-        </p>
+        <p class="text-xs text-slate-400 mt-4 text-center">Lupa kata sandi? Hubungi Administrator Sistem</p>
       </div>
+      <p class="text-xs text-slate-500 mt-6 text-center">© 2026 PT Stechoq Robotika Indonesia · DCS APP v1.0.0</p>
     </div>
   </div>
 </template>

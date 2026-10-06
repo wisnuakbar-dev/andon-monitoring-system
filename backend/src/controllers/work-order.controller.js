@@ -132,3 +132,57 @@ export const deleteWorkOrder = asyncHandler(async (req, res) => {
   await prisma.workOrder.delete({ where: { id } })
   res.json({ message: 'WorkOrder berhasil dihapus' })
 })
+
+export const approveWorkOrder = asyncHandler(async (req, res) => {
+  const id = parseId(req.params.id)
+  if (!id) return res.status(400).json({ message: 'ID tidak valid' })
+
+  const exists = await prisma.workOrder.findUnique({ where: { id } })
+  if (!exists) return res.status(404).json({ message: notFoundMessage('WorkOrder') })
+
+  const workOrder = await prisma.workOrder.update({
+    where: { id },
+    data: { approvalStatus: 'APPROVED' },
+    include: workOrderInclude,
+  })
+  res.json(workOrder)
+})
+
+export const rejectWorkOrder = asyncHandler(async (req, res) => {
+  const id = parseId(req.params.id)
+  if (!id) return res.status(400).json({ message: 'ID tidak valid' })
+
+  const exists = await prisma.workOrder.findUnique({ where: { id } })
+  if (!exists) return res.status(404).json({ message: notFoundMessage('WorkOrder') })
+
+  const workOrder = await prisma.workOrder.update({
+    where: { id },
+    data: { approvalStatus: 'REJECTED' },
+    include: workOrderInclude,
+  })
+  res.json(workOrder)
+})
+
+export const updateWorkOrderStatus = asyncHandler(async (req, res) => {
+  const id = parseId(req.params.id)
+  if (!id) return res.status(400).json({ message: 'ID tidak valid' })
+
+  const { approvalStatus } = req.body
+  if (!approvalStatus) {
+    return res.status(400).json({ message: 'approvalStatus wajib diisi' })
+  }
+
+  if (!['DRAFT', 'APPROVED', 'REJECTED'].includes(approvalStatus)) {
+    return res.status(400).json({ message: 'approvalStatus tidak valid' })
+  }
+
+  const exists = await prisma.workOrder.findUnique({ where: { id } })
+  if (!exists) return res.status(404).json({ message: notFoundMessage('WorkOrder') })
+
+  const workOrder = await prisma.workOrder.update({
+    where: { id },
+    data: { approvalStatus },
+    include: workOrderInclude,
+  })
+  res.json(workOrder)
+})

@@ -178,9 +178,31 @@ const pageTitles = {
   items: 'Item Management',
 }
 
-const visibleNavItems = computed(() =>
-  navItems.filter((item) => !item.roles || item.roles.includes(auth.roleCode)),
-)
+const visibleNavItems = computed(() => {
+  const role = auth.roleCode
+
+  if (role === 'ADMIN') {
+    return navItems
+  }
+
+  if (role === 'SUPERVISOR') {
+    const allowedSupervisor = [
+      'dashboard',
+      'work-orders',
+      'production-analytics',
+      'andon-monitoring',
+    ]
+    return navItems.filter((item) => allowedSupervisor.includes(item.name))
+  }
+
+  if (role === 'OPERATOR') {
+    return navItems.filter(
+      (item) => item.name === 'operator-playground' || item.name === 'andon-monitoring',
+    )
+  }
+
+  return navItems
+})
 
 const isActive = (path) =>
   path === '/' ? route.path === '/' : route.path.startsWith(path)

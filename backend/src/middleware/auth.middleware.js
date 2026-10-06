@@ -26,5 +26,6 @@ export const authorize = (...allowedRoles) => (req, res, next) => {
   next()
 }
 
-export const readAccess = [authenticate, authorize('ADMIN', 'SUPERVISOR')]
-export const writeAccess = [authenticate, authorize('ADMIN')]
+export const readAccess = [authenticate, authorize('ADMIN', 'SUPERVISOR', 'OPERATOR')]
+export const writeAccess = [authenticate, authorize('ADMIN', 'SUPERVISOR')]
+export const approvalAccess = [authenticate, authorize('ADMIN', 'SUPERVISOR')]

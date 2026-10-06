@@ -20,10 +20,10 @@
     </div>
 
     <div
-      v-if="store.error"
+      v-if="store.error || accessDenied"
       class="mb-6 px-4 py-2 rounded border border-red-500 bg-red-50 text-sm font-semibold text-red-700 dark:bg-red-950/50 dark:text-red-300"
     >
-      {{ store.error }}
+      {{ accessDenied || store.error }}
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
@@ -125,10 +125,19 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, computed } from 'vue'
 import { useAndonStore } from '@/stores/andon'
+import { useRoute } from 'vue-router'
 
 const store = useAndonStore()
+const route = useRoute()
+
+const accessDenied = computed(() => {
+  if (route.query.accessDenied) {
+    return 'Akses ditolak. Anda tidak memiliki izin untuk mengakses halaman tersebut.'
+  }
+  return ''
+})
 
 const statusClass = (machine) => {
   if (!machine.isActive) return 'bg-gray-100 dark:bg-slate-700/40'

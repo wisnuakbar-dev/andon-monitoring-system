@@ -29,6 +29,7 @@
               type="text"
               placeholder="wss://test.mosquitto.org:8081/mqtt"
               class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-[#e91e63]"
+              @input="mqtt.userEditedUrl = true"
             />
           </div>
           <div>
@@ -38,9 +39,16 @@
               type="text"
               placeholder="andon/simulator"
               class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-[#e91e63]"
+              @input="mqtt.userEditedTopic = true"
             />
           </div>
         </div>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          Diisi otomatis dari backend
+          <span v-if="mqtt.backendBroker"> ({{ mqtt.backendBroker }})</span>
+          <span v-else> — saat ini memakai nilai default.</span>
+          Pastikan nilainya sama dengan terminal backend, kalau tidak event tidak akan masuk database.
+        </p>
         <div class="flex items-center gap-2 mt-3">
           <button
             v-if="!mqtt.isConnected"
@@ -159,7 +167,13 @@
 
     <div class="bg-white dark:bg-slate-800 rounded-lg shadow p-4">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="font-semibold dark:text-white">Log Publikasi ({{ mqtt.log.length }})</h2>
+        <div>
+          <h2 class="font-semibold dark:text-white">Log Publikasi ({{ mqtt.log.length }})</h2>
+          <p v-if="savedCounter" class="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+            {{ savedCounter }} event terkonfirmasi tersimpan di database
+            <span v-if="savedAt">({{ formatTime(savedAt) }})</span>
+          </p>
+        </div>
         <button
           v-if="mqtt.log.length"
           class="text-sm text-gray-500 hover:text-gray-700"
@@ -207,6 +221,9 @@ const qty = ref(1)
 const defectId = ref('')
 const abnormalityId = ref('')
 const downMinutes = ref(5)
+// Konfirmasi balik dari backend: jumlah event yang benar-benar tersimpan di DB.
+const savedCounter = ref(0)
+const savedAt = ref(null)
 
 const selectedWo = computed(() => workOrders.value.find((wo) => wo.id === selectedWoId.value) ?? null)
 
@@ -297,6 +314,8 @@ async function sendEvent(event) {
   const extra = buildExtra(event)
   try {
     await mqtt.publish(event, { ...context(), ...extra })
+    savedAt.value = new Date().toISOString()
+    savedCounter.value += 1
   } catch (err) {
     window.alert(err?.message || 'Gagal publish ke broker MQTT')
   }
@@ -305,6 +324,10 @@ async function sendEvent(event) {
 const formatTime = (iso) => new Date(iso).toLocaleTimeString('id-ID', { hour12: false })
 
 onMounted(async () => {
+  // Broker & topik diambil dari backend supaya tidak publish ke broker yang
+  // berbeda dari yang di-subscribe ingest.
+  await mqtt.loadBackendConfig()
+
   try {
     const { data } = await api.get('/work-orders', { params: { approvalStatus: 'APPROVED' } })
     workOrders.value = data

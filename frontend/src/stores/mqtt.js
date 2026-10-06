@@ -1,26 +1,56 @@
 import { defineStore } from 'pinia'
 import mqtt from 'mqtt'
+import api from '@/services/api'
 
-const DEFAULT_URL = 'wss://test.mosquitto.org:8081/mqtt'
-const DEFAULT_TOPIC = 'andon/simulator'
+// Fallback dipakai hanya sampai config dari backend (/realtime/ingest-config)
+// berhasil dimuat. Backend adalah sumber kebenaran supaya tidak ada publish
+// ke broker yang berbeda dari yang di-subscribe ingest.
+const FALLBACK_URL = 'wss://test.mosquitto.org:8081/mqtt'
+const FALLBACK_TOPIC = 'andon/simulator'
 const MAX_LOG = 50
 
 export const useMqttStore = defineStore('mqtt', {
   state: () => ({
     client: null,
     status: 'disconnected',
-    url: DEFAULT_URL,
-    topic: DEFAULT_TOPIC,
+    url: FALLBACK_URL,
+    topic: FALLBACK_TOPIC,
     error: null,
     log: [],
+    configLoaded: false,
+    backendBroker: null,
+    // Bernilai true kalau user mengetik sendiri, supaya loadBackendConfig tidak
+    // menimpa nilai yang sudah diketik manual.
+    userEditedUrl: false,
+    userEditedTopic: false,
   }),
   getters: {
     isConnected: (state) => state.status === 'connected',
     isBusy: (state) => state.status === 'connecting',
   },
   actions: {
+    /**
+     * Ambil broker + topik yang sedang di-subscribe backend. Nilai di input
+     * hanya dipakai kalau user benar-benar mengeditnya sendiri (manual override).
+     */
+    async loadBackendConfig() {
+      try {
+        const { data } = await api.get('/realtime/ingest-config')
+        this.backendBroker = data.brokerWsUrl ?? data.broker ?? null
+        this.configLoaded = true
+        const first = data.topics?.[0] ?? null
+        // Kalau backend subscribe wildcard (mis. "andon/#"), pakai subtopik
+        // turunannya. Kalau topiknya spesifik, publish ke topik yang sama.
+        const derived = first?.endsWith('/#') ? `${first.slice(0, -2)}simulator` : first
+        if (derived && !this.userEditedTopic) this.topic = derived
+        if (data.brokerWsUrl && !this.userEditedUrl) this.url = data.brokerWsUrl
+      } catch (err) {
+        this.addLog('Gagal ambil config broker backend', { error: err?.message })
+      }
+    },
+
     connect() {
-      this.disconnect()
+      this.disconnect({ silent: true })
       this.status = 'connecting'
       this.error = null
       try {
@@ -62,13 +92,13 @@ export const useMqttStore = defineStore('mqtt', {
       }
     },
 
-    disconnect() {
+    disconnect({ silent = false } = {}) {
       if (this.client) {
         this.client.end(true)
         this.client = null
       }
       this.status = 'disconnected'
-      this.addLog('Terputus dari broker', null)
+      if (!silent) this.addLog('Terputus dari broker', null)
     },
 
     publish(event, payload) {
@@ -77,7 +107,7 @@ export const useMqttStore = defineStore('mqtt', {
       }
       const message = JSON.stringify({ event, ...payload })
       return new Promise((resolve, reject) => {
-        this.client.publish(this.topic.trim() || DEFAULT_TOPIC, message, { qos: 0 }, (err) => {
+        this.client.publish(this.topic.trim() || FALLBACK_TOPIC, message, { qos: 0 }, (err) => {
           if (err) {
             this.error = err?.message || 'Gagal mem-publish pesan'
             this.addLog('Gagal publish', { event, error: this.error })
@@ -92,8 +122,10 @@ export const useMqttStore = defineStore('mqtt', {
     },
 
     resetUrl() {
-      this.url = DEFAULT_URL
-      this.topic = DEFAULT_TOPIC
+      this.url = this.backendBroker ?? FALLBACK_URL
+      this.topic = FALLBACK_TOPIC
+      this.userEditedUrl = false
+      this.userEditedTopic = false
     },
 
     addLog(label, payload) {

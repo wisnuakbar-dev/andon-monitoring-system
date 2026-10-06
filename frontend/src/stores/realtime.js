@@ -11,7 +11,16 @@ const KPI_EVENT = {
   SNAPSHOT: 'kpi:snapshot',
   UPDATE: 'kpi:update',
   ERROR: 'kpi:error',
+  // Event tanpa scope dari backend. Dipakai sebagai pemicu paling cepat: begitu
+  // ada log produksi baru, layar andon langsung ambil ulang snapshot tanpa
+  // menunggu kpi:update yang lewat debounce.
+  ANDON_UPDATE: 'andon:update',
+  PRODUCTION_LOG: 'production:log',
 }
+
+// Event "data masuk" memicu fetch REST langsung. Ditunda sedikit supaya burst
+// beberapa klik tidak membanjiri backend dengan request KPI.
+const LIVE_FETCH_DEBOUNCE_MS = 250
 
 // Parameter scope yang dikenali backend: sama untuk GET /realtime/kpi dan event "kpi:subscribe".
 const SCOPE_KEYS = ['rangeDays', 'timezone', 'shiftId', 'machineId', 'itemId', 'workOrderId']
@@ -47,6 +56,8 @@ export const useRealtimeStore = defineStore('realtime', {
     // sehingga papan andon tidak ikut kosong saat filter diganti.
     restPending: 0,
     restRequestId: 0,
+    liveTimer: null,
+    lastLogEvent: null,
   }),
 
   getters: {
@@ -171,6 +182,35 @@ export const useRealtimeStore = defineStore('realtime', {
       this.client.on(KPI_EVENT.ERROR, (payload) => {
         this.error = payload?.message || 'Gagal menghitung KPI terbaru'
       })
+
+      // Pemicu tercepat: log baru tersimpan di DB -> langsung tarik data terbaru.
+      this.client.on(KPI_EVENT.PRODUCTION_LOG, (payload) => {
+        this.handleLiveEvent(payload)
+      })
+
+      this.client.on(KPI_EVENT.ANDON_UPDATE, (payload) => {
+        this.handleLiveEvent(payload)
+      })
+    },
+
+    /**
+     * Dipanggil saat backend memberi tahu ada log produksi baru. Snapshot
+     * diambil ulang lewat REST karena kpi:update.backend memakai debounce dan
+     * bisa terlambat; ini membuat angka di layar naik secepat mungkin.
+     */
+    handleLiveEvent(payload) {
+      const trigger = payload?.trigger ?? null
+      this.lastLogEvent = {
+        event: payload?.event ?? trigger?.event ?? null,
+        productionLogId: payload?.productionLogId ?? trigger?.productionLogId ?? null,
+        result: payload?.result ?? trigger?.result ?? null,
+        receivedAt: new Date().toISOString(),
+      }
+      if (this.liveTimer) return
+      this.liveTimer = setTimeout(() => {
+        this.liveTimer = null
+        this.fetchSnapshot(this.scope)
+      }, LIVE_FETCH_DEBOUNCE_MS)
     },
 
     /** Ganti filter papan (scope) tanpa memutus koneksi. */
@@ -193,6 +233,10 @@ export const useRealtimeStore = defineStore('realtime', {
     },
 
     teardown() {
+      if (this.liveTimer) {
+        clearTimeout(this.liveTimer)
+        this.liveTimer = null
+      }
       if (this.client) {
         this.client.removeAllListeners()
         this.client.disconnect()
@@ -202,6 +246,7 @@ export const useRealtimeStore = defineStore('realtime', {
 
     reset() {
       this.teardown()
+      this.lastLogEvent = null
       // Naikkan id supaya request REST yang masih berjalan diabaikan.
       this.restRequestId += 1
       this.status = 'idle'

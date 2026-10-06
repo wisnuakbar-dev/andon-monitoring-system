@@ -5,6 +5,13 @@ import { resolveUserFromToken } from '../utils/authToken.js'
 export const SCOPE_ROOM_PREFIX = 'kpi:'
 export const roomForScope = (scopeKey) => `${SCOPE_ROOM_PREFIX}${scopeKey}`
 
+// Nama event Socket.IO yang stable supaya frontend bisa listens tanpa tahu
+// detail internal pipeline MQTT. Snapshot KPI tetap dikirim lewat kpi:update.
+export const ANDON_EVENT = {
+  UPDATE: 'andon:update',
+  LOG: 'production:log',
+}
+
 let io = null
 
 // scopeKey -> Set<socketId>, dipakai untuk tahu scope mana yang masih punya pendengar
@@ -114,6 +121,16 @@ export const emitToScope = (scopeKey, event, payload) => {
 export const emitToSocket = (socket, event, payload) => {
   if (!socket?.connected) return
   socket.emit(event, payload)
+}
+
+/**
+ * Broadcast ke semua klien Socket.IO (bukan per-room scope). Dipakai untuk event
+ * yang tidak terikat filter papan, mis. "ada log produksi baru tersimpan".
+ */
+export const broadcastAndonEvent = (event, payload) => {
+  if (!io) return 0
+  io.emit(event, payload)
+  return io.engine?.clientsCount ?? 0
 }
 
 export const getSocketStats = () => ({

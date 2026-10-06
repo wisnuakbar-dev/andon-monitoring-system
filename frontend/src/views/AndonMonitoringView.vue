@@ -20,6 +20,14 @@
       </div>
 
       <div class="flex items-center gap-2">
+        <span
+          v-if="lastLiveEvent"
+          class="px-2 py-1.5 rounded text-[0.65rem] font-bold uppercase tracking-wider bg-emerald-900/60 text-emerald-300"
+          :title="lastLiveEvent.receivedAt"
+        >
+          {{ lastLiveEvent.event }} #{{ lastLiveEvent.productionLogId }} masuk
+        </span>
+
         <select
           v-model="rangeDays"
           class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs font-semibold"
@@ -267,6 +275,9 @@ const rangeOptions = [
 
 const rangeDays = ref(1)
 const machineId = ref('')
+// Indikator singkat bahwa event MQTT terakhir benar-benar tersimpan di DB,
+// berguna untuk memastikan tombol di Operator Playground tidak "bunga".
+const lastLiveEvent = computed(() => realtime.lastLogEvent)
 const clock = ref('')
 const clockDate = ref('')
 const now = ref(Date.now())

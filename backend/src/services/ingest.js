@@ -1,7 +1,8 @@
 import mqtt from 'mqtt'
 import prisma from '../config/prisma.js'
-import { MQTT_BROKER_URL, MQTT_TOPIC, MQTT_CLIENT_ID } from '../config/index.js'
+import { MQTT_BROKER_URLS, MQTT_TOPICS, MQTT_CLIENT_ID } from '../config/index.js'
 import { notifyKpiChanged } from './kpi.broadcaster.js'
+import { ANDON_EVENT, broadcastAndonEvent } from './socket.service.js'
 
 const VALID_RESULTS = ['OK', 'NG', 'REJECT']
 const VALID_DOWNTIME = ['BREAKDOWN', 'SETUP', 'MATERIAL', 'MAINTENANCE', 'QUALITY', 'OTHER']
@@ -15,6 +16,8 @@ const EVENT_LABELS = {
   PRODUCTION_SETUP: 'Production setup',
   FINISH_SHIFT: 'Finish shift',
 }
+
+const KNOWN_EVENTS = new Set(Object.keys(EVENT_LABELS))
 
 const toInt = (value) => {
   const n = Number(value)
@@ -80,6 +83,12 @@ async function handleMessage(topic, message) {
     console.warn(`[ingest] Payload tanpa field "event" diabaikan: ${message.toString().slice(0, 200)}`)
     return
   }
+  if (!KNOWN_EVENTS.has(event)) {
+    // Penting saat topik subscribe memakai wildcard: broker publik dipakai banyak
+    // aplikasi, jadi pesan dari sistem lain akan masuk ke sini juga.
+    console.warn(`[ingest] Event "${event}" tidak dikenal, dilewati (topik "${topic}")`)
+    return
+  }
 
   const entry = mapToProductionLog(event, payload)
 
@@ -95,11 +104,22 @@ async function handleMessage(topic, message) {
   try {
     const saved = await prisma.productionLog.create({ data: entry })
     console.log(
-      `[ingest] ProductionLog #${saved.id} tersimpan: ${event} | WO ${workOrderId} | result=${entry.result} | good=${entry.goodQty ?? 0} | ng=${entry.ngQty ?? 0}`
+      `[ingest] Berhasil simpan log: ${JSON.stringify({
+        productionLogId: saved.id,
+        event,
+        workOrderId,
+        workOrderCode: payload.workOrderCode ?? null,
+        machineId: payload.machineId ?? null,
+        result: saved.result,
+        goodQty: saved.goodQty,
+        ngQty: saved.ngQty,
+        downtimeCategory: saved.downtimeCategory,
+        downtimeMinutes: saved.downtimeMinutes,
+        loggedAt: saved.loggedAt.toISOString(),
+      })}`
     )
 
-    // Data baru sudah tersimpan -> memicu broadcast KPI realtime ke semua klien WebSocket
-    notifyKpiChanged({
+    const trigger = {
       source: 'mqtt-ingest',
       topic,
       event,
@@ -111,30 +131,85 @@ async function handleMessage(topic, message) {
       downtimeCategory: saved.downtimeCategory,
       downtimeMinutes: saved.downtimeMinutes,
       loggedAt: saved.loggedAt.toISOString(),
+    }
+
+    // Broadcast event mentah lebih dulu supaya UI bisa langsung bereaksi (mis. bunyi
+    // alarm / flash kartu mesin) tanpa menunggu perhitungan KPI selesai.
+    broadcastAndonEvent(ANDON_EVENT.LOG, {
+      ...trigger,
+      workOrderCode: payload.workOrderCode ?? null,
+      machineId: payload.machineId ?? null,
+      note: saved.note,
     })
+
+    // Data baru sudah tersimpan -> memicu broadcast KPI realtime ke semua klien WebSocket
+    notifyKpiChanged(trigger)
   } catch (err) {
     console.error(`[ingest] Gagal menyimpan ProductionLog untuk event "${event}": ${err.message}`)
   }
 }
 
 let client = null
+let brokerIndex = 0
+let status = 'disconnected'
+let lastError = null
 
-export const startIngest = () => {
-  if (client) return client
+/**
+ * Terjemahkan URL broker TCP (mqtt://host:1883) menjadi URL WebSocket yang bisa
+ * dipakai browser (wss://host:8081/mqtt untuk Mosquitto, wss://host:8884/mqtt
+ * untuk HiveMQ). Dipakai endpoint config supaya Operator Playground publish ke
+ * broker yang sama dengan yang di-subscribe backend.
+ */
+const WS_PORTS = {
+  'test.mosquitto.org': '8081/mqtt',
+  'broker.hivemq.com': '8884/mqtt',
+}
 
-  client = mqtt.connect(MQTT_BROKER_URL, {
+export const toWebSocketUrl = (brokerUrl) => {
+  const withoutScheme = String(brokerUrl).replace(/^mqtts?:\/\//, '')
+  const [host, port] = withoutScheme.split(':')
+  if (!host) return null
+  if (WS_PORTS[host]) return `wss://${host}:${WS_PORTS[host]}`
+  return `ws://${host}:${port ?? '8081'}/mqtt`
+}
+
+const setStatus = (next, error = null) => {
+  status = next
+  lastError = error
+}
+
+export const getIngestStatus = () => ({
+  status,
+  broker: MQTT_BROKER_URLS[brokerIndex] ?? null,
+  brokers: MQTT_BROKER_URLS,
+  brokerWsUrl: toWebSocketUrl(MQTT_BROKER_URLS[brokerIndex] ?? ''),
+  topics: MQTT_TOPICS,
+  error: lastError,
+})
+
+const connectBroker = () => {
+  const broker = MQTT_BROKER_URLS[brokerIndex]
+  setStatus('connecting')
+
+  client = mqtt.connect(broker, {
     clientId: `${MQTT_CLIENT_ID}-${Math.random().toString(16).slice(2, 8)}`,
     clean: true,
     connectTimeout: 10000,
-    reconnectPeriod: 3000,
+    reconnectPeriod: 5000,
+    maxReconnectPeriod: 30000,
+    reconnecting: true,
     keepalive: 60,
   })
 
   client.on('connect', () => {
-    console.log(`[ingest] Terhubung ke MQTT ${MQTT_BROKER_URL}, subscribe topik "${MQTT_TOPIC}"`)
-    client.subscribe(MQTT_TOPIC, { qos: 0 }, (err) => {
-      if (err) console.error(`[ingest] Gagal subscribe topik "${MQTT_TOPIC}": ${err.message}`)
-    })
+    setStatus('connected')
+    console.log(`[ingest] Terhubung ke MQTT ${broker}`)
+    for (const topic of MQTT_TOPICS) {
+      client.subscribe(topic, { qos: 0 }, (err) => {
+        if (err) console.error(`[ingest] Gagal subscribe topik "${topic}": ${err.message}`)
+        else console.log(`[ingest] Subscribe topik "${topic}"`)
+      })
+    }
   })
 
   client.on('reconnect', () => {
@@ -142,11 +217,31 @@ export const startIngest = () => {
   })
 
   client.on('error', (err) => {
-    console.error(`[ingest] Error MQTT: ${err.message}`)
+    setStatus('error', err.message)
+    console.error(`[ingest] Error MQTT (${broker}): ${err.message}`)
+  })
+
+  client.on('offline', () => {
+    console.warn('[ingest] Koneksi MQTT offline')
   })
 
   client.on('close', () => {
-    console.warn('[ingest] Koneksi MQTT tertutup')
+    // Pindah ke broker berikutnya kalau ada, supaya public broker yang sedang
+    // down tidak mematikan seluruh pipeline ingest.
+    if (MQTT_BROKER_URLS.length > 1) {
+      brokerIndex = (brokerIndex + 1) % MQTT_BROKER_URLS.length
+      console.warn(`[ingest] Koneksi ditutup, beralih ke broker berikutnya: ${MQTT_BROKER_URLS[brokerIndex]}`)
+      setStatus('connecting')
+      try {
+        client?.end(true)
+      } catch {
+        // abaikan, koneksi memang sudah tertutup
+      }
+      client = null
+      setTimeout(() => {
+        if (status !== 'connected') connectBroker()
+      }, 2000)
+    }
   })
 
   client.on('message', (topic, message) => {
@@ -158,8 +253,15 @@ export const startIngest = () => {
   return client
 }
 
+export const startIngest = () => {
+  if (client) return client
+  return connectBroker()
+}
+
 export const stopIngest = () => {
+  setStatus('disconnected')
   if (client) {
+    client.removeAllListeners()
     client.end(true)
     client = null
   }

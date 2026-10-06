@@ -54,11 +54,31 @@ router.beforeEach((to) => {
   }
 
   if (to.meta.roles && !to.meta.roles.includes(auth.roleCode)) {
+    if (auth.isAuthenticated && auth.roleCode === 'SUPERVISOR') {
+      return { name: 'dashboard', query: { accessDenied: '1' } }
+    }
     return { name: 'dashboard' }
   }
 
+  if (auth.isAuthenticated && auth.roleCode === 'SUPERVISOR') {
+    const blockedSupervisorRoutes = ['users', 'machines', 'items', 'operator-playground']
+    if (blockedSupervisorRoutes.includes(to.name)) {
+      return { name: 'dashboard', query: { accessDenied: '1' } }
+    }
+  }
+
   if (to.name === 'login' && auth.isAuthenticated) {
+    if (auth.roleCode === 'OPERATOR') {
+      return { name: 'operator-playground' }
+    }
     return { name: 'dashboard' }
+  }
+
+  if (auth.isAuthenticated && auth.roleCode === 'OPERATOR') {
+    const allowedOperatorRoutes = ['operator-playground', 'andon-monitoring']
+    if (!allowedOperatorRoutes.includes(to.name)) {
+      return { name: 'operator-playground' }
+    }
   }
 })
 
